@@ -1,0 +1,12 @@
+/.ipynb_checkpoints
+/.venv
+/pl00_intro
+/pl01_basics
+/pl02_fp_basics
+/pl03_oop_basics
+/pl04_standalone
+/pl05_generic_fun_type
+/pl06_how_it_gets_compiled
+/pl07_hand_compile
+/pl09_memory_management
+/pl10_rust

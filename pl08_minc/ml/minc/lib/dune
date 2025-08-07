@@ -1,0 +1,14 @@
+(library
+ (name minc_ast)
+ (modules minc_ast))
+
+(library
+ (name minc_parse)
+ (modules minc_parse)
+ (libraries markup minc_ast))
+
+(library
+ (name minc_cogen)
+ (modules minc_cogen)
+ (libraries minc_ast))
+

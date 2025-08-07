@@ -1,0 +1,8 @@
+lib: [
+  "_build/install/default/lib/minc/META"
+  "_build/install/default/lib/minc/dune-package"
+  "_build/install/default/lib/minc/opam"
+]
+bin: [
+  "_build/install/default/bin/minc"
+]

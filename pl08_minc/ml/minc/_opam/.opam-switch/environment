@@ -1,0 +1,3 @@
+OPAM_SWITCH_PREFIX	=	/home/u25067/notebooks/pl08_minc/ml/minc/_opam	:	target	Prefix\ of\ the\ current\ opam\ switch
+MANPATH	=:	/home/u25067/notebooks/pl08_minc/ml/minc/_opam/man	:	host	Current\ opam\ switch\ man\ dir
+PATH	+=	/home/u25067/notebooks/pl08_minc/ml/minc/_opam/bin	:	target	Binary\ dir\ for\ opam\ switch\ /home/u25067/notebooks/pl08_minc/ml/minc

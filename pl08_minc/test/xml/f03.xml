@@ -1,0 +1,27 @@
+<program xmlns="https://program.com">
+ <fun_def>
+  <name>f</name>
+  <params>
+   <param>
+    <type>
+     <primitive_type>long</primitive_type>
+    </type>
+    <name>x</name>
+   </param>
+  </params>
+  <return_type>
+   <primitive_type>long</primitive_type>
+  </return_type>
+  <body>
+   <compound>
+    <decls/>
+    <stmts>
+     <return>
+      <var>x</var>
+     </return>
+    </stmts>
+   </compound>
+  </body>
+ </fun_def>
+</program>
+
