@@ -11,15 +11,13 @@ f:
   str x1, [x29, #-16]
   str x2, [x29, #-24]
   str x3, [x29, #-32]
-  ldr x0, [x29, #-8]
-  mov x10, x0
-  ldr x0, [x29, #-16]
-  mul x0, x10, x0
+  ldr x10, [x29, #-8]
+  ldr x1, [x29, #-16]
+  mul x0, x10, x1
   mov x9, x0
-  ldr x0, [x29, #-24]
-  mov x10, x0
-  ldr x0, [x29, #-32]
-  mul x0, x10, x0
+  ldr x10, [x29, #-24]
+  ldr x1, [x29, #-32]
+  mul x0, x10, x1
   add x0, x9, x0
   b .L_epilogue_f
 .L_epilogue_f:

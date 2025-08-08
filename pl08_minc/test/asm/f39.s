@@ -12,9 +12,7 @@ f:
   add x0, x0, #2
   str x0, [x29, #-16]
   ldr x0, [x29, #-16]
-  mov x9, x0
-  ldr x0, [x29, #-16]
-  mul x0, x9, x0
+  mul x0, x0, x0
   b .L_epilogue_f
 .L_epilogue_f:
   add sp, sp, #32

@@ -15,20 +15,16 @@ f:
   str x5, [x29, #-48]
   str x6, [x29, #-56]
   str x7, [x29, #-64]
-  ldr x0, [x29, #-24]
-  mov x12, x0
-  ldr x0, [x29, #-32]
-  mov x13, x0
-  ldr x0, [x29, #-40]
-  mul x0, x13, x0
+  ldr x12, [x29, #-24]
+  ldr x13, [x29, #-32]
+  ldr x1, [x29, #-40]
+  mul x0, x13, x1
   add x0, x12, x0
   mov x11, x0
-  ldr x0, [x29, #-48]
-  mov x12, x0
-  ldr x0, [x29, #-56]
-  mov x13, x0
-  ldr x0, [x29, #-64]
-  mul x0, x13, x0
+  ldr x12, [x29, #-48]
+  ldr x13, [x29, #-56]
+  ldr x1, [x29, #-64]
+  mul x0, x13, x1
   add x0, x12, x0
   cmp x11, x0
   cset x0, lt

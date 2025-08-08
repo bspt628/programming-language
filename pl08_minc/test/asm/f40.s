@@ -13,17 +13,15 @@ f:
   ldr x0, [x29, #-8]
   cmp x0, #0
   beq .Lif_else_1
-  ldr x0, [x29, #-16]
-  mov x9, x0
-  ldr x0, [x29, #-24]
-  add x0, x9, x0
+  ldr x9, [x29, #-16]
+  ldr x1, [x29, #-24]
+  add x0, x9, x1
   b .L_epilogue_f
   b .Lif_end_2
 .Lif_else_1:
-  ldr x0, [x29, #-16]
-  mov x9, x0
-  ldr x0, [x29, #-24]
-  mul x0, x9, x0
+  ldr x9, [x29, #-16]
+  ldr x1, [x29, #-24]
+  mul x0, x9, x1
   b .L_epilogue_f
 .Lif_end_2:
 .L_epilogue_f:

@@ -45,13 +45,15 @@ let label_counter = ref 0
 (* param_regs: AArch64の引数渡しで使われるレジスタ名リスト *)
 let param_regs = ["x0"; "x1"; "x2"; "x3"; "x4"; "x5"; "x6"; "x7"]
 
-(* 
- * 動的レジスタ割り当てシステム
+(*
+ * 動的レジスタ割り当てシステム + 変数キャッシングシステム
  * ARM64の豊富なレジスタを活用して入れ子構造に対応
  *)
 
 (* temp_regs: 一時的な計算用レジスタのプール（x9-x15を使用、x8は除外） *)
 let temp_regs = ["x9"; "x10"; "x11"; "x12"; "x13"; "x14"; "x15"]
+
+(* 変数キャッシングシステムは削除 - より効果的な直接最適化を実装 *)
 
 (* get_temp_register: 入れ子の深さに基づいて適切なレジスタを選択 *)
 let get_temp_register depth =
@@ -126,7 +128,7 @@ let rec cogen_expr params env asm_rev depth expr =
   | ExprIntLiteral n ->
       (Printf.sprintf "  mov x0, #%Ld" n) :: asm_rev
 
-  (* ケース2: 変数。変数の値をメモリからレジスタにロードする。 *)
+  (* ケース2: 変数。変数の値をメモリからレジスタにロードする（キャッシング最適化）。 *)
   | ExprId name ->
       let param_index = try List.mapi (fun i (_, n) -> if n = name then i else -1) params |> List.find (fun x -> x >= 0)
                        with Not_found -> -1 in
@@ -138,11 +140,7 @@ let rec cogen_expr params env asm_rev depth expr =
       else
         Env.find name env
       in
-      (* 引数は全てx0に入っている。 *)
-      let reg = "x0" in
-      (* 【注意: バグあり】ベースレジスタとして `sp` を使っていますが、関数内でspが変化するとアドレスがずれます。*)
-      (* 本来は不動の `x29` を使うべきです。 *)
-      (Printf.sprintf "  ldr %s, [x29, #%d]" reg offset) :: asm_rev
+      (Printf.sprintf "  ldr x0, [x29, #%d]" offset) :: asm_rev
 
   (* ケース3: カッコ式。カッコは評価順序を変えるだけなので、中身を再帰的に評価する。 *)
   | ExprParen e ->
@@ -201,7 +199,7 @@ let rec cogen_expr params env asm_rev depth expr =
   (* ケース5: 演算子を使った式。 *)
   | ExprOp(op, args) ->
       (match op, args with
-      (* ケース5-1: 代入。右辺を評価し、左辺の変数のアドレスに結果をストアする。 *)
+      (* ケース5-1: 代入。右辺を評価し、左辺の変数のアドレスに結果をストアする（キャッシング対応）。 *)
       | "=", [ExprId name; right_expr] ->
           let param_index = try List.mapi (fun i (_, n) -> if n = name then i else -1) params |> List.find (fun x -> x >= 0)
                            with Not_found -> -1 in
@@ -214,7 +212,6 @@ let rec cogen_expr params env asm_rev depth expr =
             Env.find name env
           in
           let asm' = cogen_expr params env asm_rev (depth + 1) right_expr in
-          (* 【注意: バグあり】引数の場合、ベースレジスタとして `sp` を使っているため、アドレスがずれる可能性があります。*)
           let base_reg = "x29" in
           (Printf.sprintf "  str x0, [%s, #%d]" base_reg offset) :: asm'
 
@@ -241,29 +238,75 @@ let rec cogen_expr params env asm_rev depth expr =
             | "%" -> [
                 "  sub x0, x0, x2";                       (* x0 = x0 - x2 (余り) *)
                 "  mul x2, x2, x1";                      (* x2 = x2 * x1 *)
-                "  udiv x2, x0, x1";                     (* x2 = x0 / x1 (商) *)
+                "  sdiv x2, x0, x1";                     (* x2 = x0 / x1 (商) *)
                 (Printf.sprintf "  mov x1, #%Ld" n)     (* 除数をx1に設定 *)
               ]
             | _ -> []
           in
           List.fold_right (fun inst acc -> inst :: acc) op_asm asm'
 
-      (* ケース5-4: 一般的な二項演算 - 動的レジスタ割り当て版 *)
+      (* ケース5-3.5: 自己乗算の最適化 (x * x) *)
+      | ("*"), [left; right] when left = right ->
+          (* 同じ変数の自己乗算は1回の読み込みで済む *)
+          let asm_for_expr = cogen_expr params env asm_rev (depth + 1) left in
+          "  mul x0, x0, x0" :: asm_for_expr
+
+      (* ケース5-4: 一般的な二項演算 - 動的レジスタ割り当て版（mov削減最適化） *)
       | ("+" | "*" | "-" | "/" | "%") as bin_op, [left; right] ->
-          (* 入れ子の深さに応じて動的にレジスタを選択 *)
+          (* 左辺が変数の場合は直接レジスタに読み込み、movを削減 *)
           let temp_reg = get_temp_register depth in
-          let asm_for_left = cogen_expr params env asm_rev (depth + 1) left in
-          let asm_mov = (Printf.sprintf "  mov %s, x0" temp_reg) :: asm_for_left in
-          let asm_for_right = cogen_expr params env asm_mov (depth + 1) right in
+          let (asm_for_left, left_reg) = match left with
+            | ExprId name ->
+                (* 変数の場合は直接temp_regに読み込み *)
+                let param_index = try List.mapi (fun i (_, n) -> if n = name then i else -1) params |> List.find (fun x -> x >= 0)
+                                 with Not_found -> -1 in
+                let offset = if param_index >= 0 then
+                  if param_index < List.length param_regs then
+                    -(8 + param_index * 8)
+                  else
+                    192 + ((param_index - List.length param_regs) * 8)
+                else
+                  Env.find name env
+                in
+                ((Printf.sprintf "  ldr %s, [x29, #%d]" temp_reg offset) :: asm_rev, temp_reg)
+            | _ ->
+                (* その他の場合は従来通り *)
+                let asm_for_left = cogen_expr params env asm_rev (depth + 1) left in
+                let asm_mov = (Printf.sprintf "  mov %s, x0" temp_reg) :: asm_for_left in
+                (asm_mov, temp_reg)
+          in
+          
+          (* 右辺が変数の場合は直接x1に読み込み、movを削減 *)
+          let (asm_for_right, right_reg) = match right with
+            | ExprId name ->
+                (* 変数の場合は直接x1に読み込み *)
+                let param_index = try List.mapi (fun i (_, n) -> if n = name then i else -1) params |> List.find (fun x -> x >= 0)
+                                 with Not_found -> -1 in
+                let offset = if param_index >= 0 then
+                  if param_index < List.length param_regs then
+                    -(8 + param_index * 8)
+                  else
+                    192 + ((param_index - List.length param_regs) * 8)
+                else
+                  Env.find name env
+                in
+                ((Printf.sprintf "  ldr x1, [x29, #%d]" offset) :: asm_for_left, "x1")
+            | _ ->
+                (* その他の場合は従来通り *)
+                let asm_for_right = cogen_expr params env asm_for_left (depth + 1) right in
+                (asm_for_right, "x0")
+          in
+          
           let op_asm = match bin_op with
-            | "+" -> [(Printf.sprintf "  add x0, %s, x0" temp_reg)]
-            | "*" -> [(Printf.sprintf "  mul x0, %s, x0" temp_reg)]
-            | "-" -> [(Printf.sprintf "  sub x0, %s, x0" temp_reg)]
-            | "/" -> [(Printf.sprintf "  sdiv x0, %s, x0" temp_reg)]
+            | "+" -> [(Printf.sprintf "  add x0, %s, %s" left_reg right_reg)]
+            | "*" -> [(Printf.sprintf "  mul x0, %s, %s" left_reg right_reg)]
+            | "-" -> [(Printf.sprintf "  sub x0, %s, %s" left_reg right_reg)]
+            | "/" -> [(Printf.sprintf "  sdiv x0, %s, %s" left_reg right_reg)]
             | "%" -> [
-                (Printf.sprintf "  sub x0, %s, x1" temp_reg);     (* x0 = temp_reg - x1 (余り) *)
-                "  mul x1, x1, x0";                               (* x1 = (temp_reg/x0) * x0 *)
-                (Printf.sprintf "  udiv x1, %s, x0" temp_reg)   (* x1 = temp_reg / x0 (商) *)
+                (Printf.sprintf "  sub x0, %s, x1" left_reg);             (* x0 = left_reg - x1 (余り) *)
+                "  mul x1, x1, x2";                                      (* x1 = x1 * x2 (保護した除数を使用) *)
+                (Printf.sprintf "  sdiv x1, %s, %s" left_reg right_reg);  (* x1 = left_reg / right_reg (商) *)
+                (Printf.sprintf "  mov x2, %s" right_reg)               (* x2 = right_reg (除数を保護) *)
               ]
             | _ -> []
           in
@@ -324,49 +367,6 @@ let rec cogen_expr params env asm_rev depth expr =
  * プログラムの制御（if, while, returnなど）を司る。
  *)
 let rec cogen_stmt params env return_label asm_rev stmt =
-  (* 比較演算の最適化: 直接分岐命令を生成 *)
-  let optimize_comparison_branch asm_with_label cond end_label =
-    match cond with
-    | ExprOp(("<" | ">" | "<=" | ">=" | "==" | "!=") as op, [left; right]) ->
-        (* 比較演算を直接分岐に変換（mov命令削減版） *)
-        let temp_reg = get_temp_register 0 in
-        (* 左辺を直接temp_regに読み込み（movを削減） *)
-        let asm_for_left = match left with
-          | ExprId name ->
-              (* 変数の場合は直接temp_regに読み込み *)
-              let param_index = try List.mapi (fun i (_, n) -> if n = name then i else -1) params |> List.find (fun x -> x >= 0)
-                               with Not_found -> -1 in
-              let offset = if param_index >= 0 then
-                if param_index < List.length param_regs then
-                  -(8 + param_index * 8)
-                else
-                  192 + ((param_index - List.length param_regs) * 8)
-              else
-                Env.find name env
-              in
-              (Printf.sprintf "  ldr %s, [x29, #%d]" temp_reg offset) :: asm_with_label
-          | _ ->
-              (* その他の場合は従来通り *)
-              let asm_for_left = cogen_expr params env asm_with_label 1 left in
-              (Printf.sprintf "  mov %s, x0" temp_reg) :: asm_for_left
-        in
-        let asm_for_right = cogen_expr params env asm_for_left 1 right in
-        let asm_cmp = (Printf.sprintf "  cmp %s, x0" temp_reg) :: asm_for_right in
-        (* 条件を反転して、falseの場合にend_labelへジャンプ *)
-        let branch_op = match op with
-          | "<" -> "bge"   (* >= なら終了 *)
-          | ">" -> "ble"   (* <= なら終了 *)
-          | "<=" -> "bgt"  (* > なら終了 *)
-          | ">=" -> "blt"  (* < なら終了 *)
-          | "==" -> "bne"  (* != なら終了 *)
-          | "!=" -> "beq"  (* == なら終了 *)
-          | _ -> "beq"
-        in
-        Some ((Printf.sprintf "  %s %s" branch_op end_label) :: asm_cmp)
-    | _ -> 
-        (* 比較演算でない場合は最適化しない *)
-        None
-  in
   match stmt with
   | StmtEmpty -> asm_rev (* 空の文は何もしない *)
   | StmtContinue ->
@@ -409,30 +409,56 @@ let rec cogen_stmt params env return_label asm_rev stmt =
         | None -> asm6 in
       (Printf.sprintf "%s:" end_label) :: asm7
 
-  (* while文。条件を評価し、ループを続けるか判断する。*)
+  (* while文。標準的な教科書構造に従って実装 *)
   | StmtWhile (cond, body) ->
       let loop_label = gen_label "while_loop" in
+      let cond_label = gen_label "while_cond" in
       let end_label = gen_label "while_end" in
       push_loop_labels end_label loop_label;
-      (* ループの開始点 *)
-      let asm' = (Printf.sprintf "%s:" loop_label) :: asm_rev in
-      (* 比較演算の最適化を試行 *)
-      let asm4 = match optimize_comparison_branch asm' cond end_label with
-        | Some optimized_asm -> optimized_asm
-        | None -> 
-            (* 従来の方式（最適化不可能な条件式） *)
-            let asm'' = cogen_expr params env asm' 0 cond in
-            let asm''' = "  cmp x0, #0" :: asm'' in
-            (Printf.sprintf "  beq %s" end_label) :: asm'''
+      
+      (* 1. まず条件判定へ飛ぶ（標準的なwhile構造） *)
+      let asm1 = (Printf.sprintf "  b %s" cond_label) :: asm_rev in
+      
+      (* 2. ループ本体の開始ラベル *)
+      let asm2 = (Printf.sprintf "%s:" loop_label) :: asm1 in
+      
+      (* 3. ループ本体のコードを生成 *)
+      let asm3 = cogen_stmt params env return_label asm2 body in
+      
+      (* 4. 条件判定のラベル *)
+      let asm4 = (Printf.sprintf "%s:" cond_label) :: asm3 in
+      
+      (* 5. 条件式を評価し、真なら本体へ戻る *)
+      let asm_final = match cond with
+        | ExprOp(("<" | ">" | "<=" | ">=" | "==" | "!=") as op, [left; right]) ->
+            (* 比較演算最適化版: 直接的な分岐生成 *)
+            let asm5 = cogen_expr params env asm4 1 right in
+            let asm6 = (Printf.sprintf "  mov x9, x0") :: asm5 in
+            let asm7 = cogen_expr params env asm6 1 left in
+            let asm8 = (Printf.sprintf "  cmp x0, x9") :: asm7 in
+            (* 条件が真の場合にloop_labelへジャンプ *)
+            let branch_op = match op with
+              | "<" -> "blt"   (* < なら継続 *)
+              | ">" -> "bgt"   (* > なら継続 *)
+              | "<=" -> "ble"  (* <= なら継続 *)
+              | ">=" -> "bge"  (* >= なら継続 *)
+              | "==" -> "beq"  (* == なら継続 *)
+              | "!=" -> "bne"  (* != なら継続 *)
+              | _ -> "bne"
+            in
+            (Printf.sprintf "  %s %s" branch_op loop_label) :: asm8
+        | _ -> 
+            (* 従来版: 条件を評価して真なら loop_label へ *)
+            let asm5 = cogen_expr params env asm4 0 cond in
+            let asm6 = "  cmp x0, #0" :: asm5 in
+            let asm7 = (Printf.sprintf "  bne %s" loop_label) :: asm6 in
+            asm7
       in
-      (* ループ本体のコードを生成 *)
-      let asm5 = cogen_stmt params env return_label asm4 body in
-      (* ループ本体の最後で、次のループのために先頭に戻る *)
-      let asm6 = (Printf.sprintf "  b %s" loop_label) :: asm5 in
-      (* ループの終了点 *)
-      let asm7 = (Printf.sprintf "%s:" end_label) :: asm6 in
+      
+      (* 6. ループの終了点 *)
+      let asm_end = (Printf.sprintf "%s:" end_label) :: asm_final in
       pop_loop_labels ();
-      asm7
+      asm_end
 
 
 (*

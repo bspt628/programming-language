@@ -9,8 +9,7 @@ f:
   mov x29, sp
   str x0, [x29, #-8]
   str x1, [x29, #-16]
-  ldr x0, [x29, #-8]
-  mov x9, x0
+  ldr x9, [x29, #-8]
   ldr x0, [x29, #-16]
   cmp x0, #0
   cset x0, eq
