@@ -214,9 +214,9 @@ let rec cogen_expr params env asm_rev expr =
           let asm' = cogen_expr params env asm_rev left in
           let op_asm = match bin_op with
             | "+" -> [(Printf.sprintf "  add x0, x0, #%Ld" n)]
-            | "*" -> [(Printf.sprintf "  mov x1, #%Ld" n); "  mul x0, x0, x1"]
+            | "*" -> ["  mul x0, x0, x1"; (Printf.sprintf "  mov x1, #%Ld" n)]
             | "-" -> [(Printf.sprintf "  sub x0, x0, #%Ld" n)]
-            | "/" -> [(Printf.sprintf "  mov x1, #%Ld" n); "  sdiv x0, x0, x1"]
+            | "/" -> ["  sdiv x0, x0, x1"; (Printf.sprintf "  mov x1, #%Ld" n)]
             | "%" -> ["  sub x0, x1, x0"; "  mul x0, x2, x0"; "  sdiv x2, x1, x0"]
             | _ -> []
           in

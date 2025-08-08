@@ -9,10 +9,10 @@ f:
   mov x29, sp
   str x0, [x29, #-8]
   ldr x0, [x29, #-8]
-  sdiv x0, x0, x1
   mov x1, #2
   sdiv x0, x0, x1
   mov x1, #3
+  sdiv x0, x0, x1
   b .L_epilogue_f
 .L_epilogue_f:
   add sp, sp, #32
