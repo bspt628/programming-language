@@ -5,17 +5,17 @@
 .type f, %function
 f:
 .cfi_startproc
-  sub sp, sp, #16
+  sub sp, sp, #32
   mov x29, sp
-  str x0, [sp, #56]
-  ldr x0, [sp, #56]
+  str x0, [x29, #-8]
+  ldr x0, [x29, #-8]
   sdiv x0, x0, x1
   mov x1, #2
   sdiv x0, x0, x1
   mov x1, #3
   b .L_epilogue_f
 .L_epilogue_f:
-  add sp, sp, #16
+  add sp, sp, #32
   ret
 .cfi_endproc
 .size f, .-f

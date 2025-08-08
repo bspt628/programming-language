@@ -110,19 +110,18 @@ let rec cogen_expr params env asm_rev expr =
       let param_index = try List.mapi (fun i (_, n) -> if n = name then i else -1) params |> List.find (fun x -> x >= 0)
                        with Not_found -> -1 in
       let offset = if param_index >= 0 then
-                    if param_index < List.length param_regs then
-                      (* 【注意: バグあり】このオフセット計算は、cogen_defでの引数保存方法と整合性が取れていません。*)
-                      56 - (param_index * 8)
-                    else
-                      64 + ((param_index - List.length param_regs) * 8)
-                  else
-                    Env.find name env in
-      (* 【注意: バグあり】このロジックは、関数の最初の引数を `x1` に、その他を `x0` にロードしようとします。*)
-      (* これは後続の二項演算のロジックと整合性が取れておらず、バグの原因となります。*)
+        if param_index < List.length param_regs then
+          -(8 + param_index * 8)  (* 第1-8引数: 負のオフセット *)
+        else
+          192 + ((param_index - List.length param_regs) * 8)  (* 第9引数以降: 正のオフセット *)
+      else
+        Env.find name env
+      in
+      (* 引数は全てx0に入っている。 *)
       let reg = "x0" in
       (* 【注意: バグあり】ベースレジスタとして `sp` を使っていますが、関数内でspが変化するとアドレスがずれます。*)
       (* 本来は不動の `x29` を使うべきです。 *)
-      (Printf.sprintf "  ldr %s, [sp, #%d]" reg offset) :: asm_rev
+      (Printf.sprintf "  ldr %s, [x29, #%d]" reg offset) :: asm_rev
 
   (* ケース3: カッコ式。カッコは評価順序を変えるだけなので、中身を再帰的に評価する。 *)
   | ExprParen e ->
@@ -186,12 +185,13 @@ let rec cogen_expr params env asm_rev expr =
           let param_index = try List.mapi (fun i (_, n) -> if n = name then i else -1) params |> List.find (fun x -> x >= 0)
                            with Not_found -> -1 in
           let offset = if param_index >= 0 then
-                        if param_index < List.length param_regs then
-                          56 - (param_index * 8)
-                        else
-                          64 + ((param_index - List.length param_regs) * 8)
-                      else
-                        Env.find name env in
+            if param_index < List.length param_regs then
+              -(8 + param_index * 8)  (* 第1-8引数: 負のオフセット *)
+            else
+              192 + ((param_index - List.length param_regs) * 8)  (* 第9引数以降: 正のオフセット *)
+          else
+            Env.find name env
+          in
           let asm' = cogen_expr params env asm_rev right_expr in
           (* 【注意: バグあり】引数の場合、ベースレジスタとして `sp` を使っているため、アドレスがずれる可能性があります。*)
           let base_reg = "x29" in
@@ -416,10 +416,11 @@ let cogen_def def =
       emit ".cfi_startproc";
 
       (* 2. スタックフレームを確保し、フレームポインタを設定する *)
-      let min_stack_size = if List.length params <= List.length param_regs then
-                          max 16 stack_size
-                        else
-                          64 in
+      let min_stack_size = 
+        let param_size = List.length params * 8 in
+        let local_size = stack_size in
+        ((param_size + local_size + 15) / 16) * 16  (* 16バイトアライメント *)
+      in
       emit (Printf.sprintf "  sub sp, sp, #%d" min_stack_size);
       emit "  mov x29, sp";
 
@@ -429,8 +430,8 @@ let cogen_def def =
             let reg = List.nth param_regs i in
             (* 【注意: 重大なバグあり】`sp` を基準に引数を保存していますが、`x29` を設定した後は `x29` を基準にすべきです。*)
             (* また、`56 - (i * 8)` のような大きな正のオフセットは、確保したスタックフレームの外側を指してしまい、メモリ破壊を引き起こす原因となります。*)
-            let offset = 56 - (i * 8) in
-            emit (Printf.sprintf "  str %s, [sp, #%d]" reg offset)
+            let offset = -(8 + i * 8) in  (* 負のオフセット *)
+            emit (Printf.sprintf "  str %s, [x29, #%d]" reg offset)
         ) params;
 
       (* --- 関数本体 (Function Body) --- *)
