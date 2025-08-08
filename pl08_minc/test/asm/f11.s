@@ -10,9 +10,9 @@ f:
   str x0, [x29, #-8]
   str x1, [x29, #-16]
   ldr x0, [x29, #-8]
-  mov x1, x0
+  mov x9, x0
   ldr x0, [x29, #-16]
-  cmp x1, x0
+  cmp x9, x0
   cset x0, eq
   b .L_epilogue_f
 .L_epilogue_f:
