@@ -104,6 +104,8 @@ let get_current_continue_label () =
   | label::_ -> label
   | [] -> failwith "continue outside of loop"
 
+
+
 (*
  * cogen_expr: 式（Expression）のコード生成を行う、再帰関数（動的レジスタ割り当て対応版）
  *
@@ -236,7 +238,12 @@ let rec cogen_expr params env asm_rev depth expr =
             | "*" -> ["  mul x0, x0, x1"; (Printf.sprintf "  mov x1, #%Ld" n)]
             | "-" -> [(Printf.sprintf "  sub x0, x0, #%Ld" n)]
             | "/" -> ["  sdiv x0, x0, x1"; (Printf.sprintf "  mov x1, #%Ld" n)]
-            | "%" -> ["  sub x0, x1, x0"; "  mul x0, x2, x0"; "  sdiv x2, x1, x0"]
+            | "%" -> [
+                "  sub x0, x0, x2";                       (* x0 = x0 - x2 (余り) *)
+                "  mul x2, x2, x1";                      (* x2 = x2 * x1 *)
+                "  udiv x2, x0, x1";                     (* x2 = x0 / x1 (商) *)
+                (Printf.sprintf "  mov x1, #%Ld" n)     (* 除数をx1に設定 *)
+              ]
             | _ -> []
           in
           List.fold_right (fun inst acc -> inst :: acc) op_asm asm'
@@ -317,6 +324,49 @@ let rec cogen_expr params env asm_rev depth expr =
  * プログラムの制御（if, while, returnなど）を司る。
  *)
 let rec cogen_stmt params env return_label asm_rev stmt =
+  (* 比較演算の最適化: 直接分岐命令を生成 *)
+  let optimize_comparison_branch asm_with_label cond end_label =
+    match cond with
+    | ExprOp(("<" | ">" | "<=" | ">=" | "==" | "!=") as op, [left; right]) ->
+        (* 比較演算を直接分岐に変換（mov命令削減版） *)
+        let temp_reg = get_temp_register 0 in
+        (* 左辺を直接temp_regに読み込み（movを削減） *)
+        let asm_for_left = match left with
+          | ExprId name ->
+              (* 変数の場合は直接temp_regに読み込み *)
+              let param_index = try List.mapi (fun i (_, n) -> if n = name then i else -1) params |> List.find (fun x -> x >= 0)
+                               with Not_found -> -1 in
+              let offset = if param_index >= 0 then
+                if param_index < List.length param_regs then
+                  -(8 + param_index * 8)
+                else
+                  192 + ((param_index - List.length param_regs) * 8)
+              else
+                Env.find name env
+              in
+              (Printf.sprintf "  ldr %s, [x29, #%d]" temp_reg offset) :: asm_with_label
+          | _ ->
+              (* その他の場合は従来通り *)
+              let asm_for_left = cogen_expr params env asm_with_label 1 left in
+              (Printf.sprintf "  mov %s, x0" temp_reg) :: asm_for_left
+        in
+        let asm_for_right = cogen_expr params env asm_for_left 1 right in
+        let asm_cmp = (Printf.sprintf "  cmp %s, x0" temp_reg) :: asm_for_right in
+        (* 条件を反転して、falseの場合にend_labelへジャンプ *)
+        let branch_op = match op with
+          | "<" -> "bge"   (* >= なら終了 *)
+          | ">" -> "ble"   (* <= なら終了 *)
+          | "<=" -> "bgt"  (* > なら終了 *)
+          | ">=" -> "blt"  (* < なら終了 *)
+          | "==" -> "bne"  (* != なら終了 *)
+          | "!=" -> "beq"  (* == なら終了 *)
+          | _ -> "beq"
+        in
+        Some ((Printf.sprintf "  %s %s" branch_op end_label) :: asm_cmp)
+    | _ -> 
+        (* 比較演算でない場合は最適化しない *)
+        None
+  in
   match stmt with
   | StmtEmpty -> asm_rev (* 空の文は何もしない *)
   | StmtContinue ->
@@ -328,10 +378,8 @@ let rec cogen_stmt params env return_label asm_rev stmt =
 
   (* 式文。例えば `x = 1;` や `f();` など。結果は使わないが、評価は行う。*)
   | StmtExpr expr ->
-      (* 【注意: 重大なバグあり】`cogen_expr`が返した命令リストを`_`で捨ててしまっているため、*)
-      (* この文のために生成されたアセンブリコードが結果に含まれません。*)
-      let _ = cogen_expr params env asm_rev 0 expr in
-      asm_rev
+      (* 式文では副作用（代入など）が重要なので、生成されたアセンブリコードを返す *)
+      cogen_expr params env asm_rev 0 expr
 
   (* return文。式を評価し、関数の末尾（エピローグ）にジャンプする。*)
   | StmtReturn expr ->
@@ -368,11 +416,15 @@ let rec cogen_stmt params env return_label asm_rev stmt =
       push_loop_labels end_label loop_label;
       (* ループの開始点 *)
       let asm' = (Printf.sprintf "%s:" loop_label) :: asm_rev in
-      (* 条件式を評価 *)
-      let asm'' = cogen_expr params env asm' 0 cond in
-      let asm''' = "  cmp x0, #0" :: asm'' in
-      (* 条件がfalse (0) なら、ループを抜けてend_labelにジャンプ *)
-      let asm4 = (Printf.sprintf "  beq %s" end_label) :: asm''' in
+      (* 比較演算の最適化を試行 *)
+      let asm4 = match optimize_comparison_branch asm' cond end_label with
+        | Some optimized_asm -> optimized_asm
+        | None -> 
+            (* 従来の方式（最適化不可能な条件式） *)
+            let asm'' = cogen_expr params env asm' 0 cond in
+            let asm''' = "  cmp x0, #0" :: asm'' in
+            (Printf.sprintf "  beq %s" end_label) :: asm'''
+      in
       (* ループ本体のコードを生成 *)
       let asm5 = cogen_stmt params env return_label asm4 body in
       (* ループ本体の最後で、次のループのために先頭に戻る *)

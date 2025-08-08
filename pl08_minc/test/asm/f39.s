@@ -8,6 +8,9 @@ f:
   sub sp, sp, #32
   mov x29, sp
   str x0, [x29, #-8]
+  ldr x0, [x29, #-8]
+  add x0, x0, #2
+  str x0, [x29, #-16]
   ldr x0, [x29, #-16]
   mov x9, x0
   ldr x0, [x29, #-16]
