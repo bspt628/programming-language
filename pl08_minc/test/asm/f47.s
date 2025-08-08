@@ -5,7 +5,8 @@
 .type f18, %function
 f18:
 .cfi_startproc
-  sub sp, sp, #192
+  stp x29, x30, [sp, #-16]!
+  sub sp, sp, #176
   mov x29, sp
   str x0, [x29, #-8]
   str x1, [x29, #-16]
@@ -18,7 +19,8 @@ f18:
   ldr x0, [x29, #-8]
   b .L_epilogue_f18
 .L_epilogue_f18:
-  add sp, sp, #192
+  add sp, sp, #176
+  ldp x29, x30, [sp], #16
   ret
 .cfi_endproc
 .size f18, .-f18
@@ -26,7 +28,8 @@ f18:
 .type f, %function
 f:
 .cfi_startproc
-  sub sp, sp, #0
+  stp x29, x30, [sp, #-16]!
+  sub sp, sp, #-16
   mov x29, sp
   mov x0, #1200
   str x0, [sp, #-16]!
@@ -66,7 +69,8 @@ f:
   add x0, x0, #10
   b .L_epilogue_f
 .L_epilogue_f:
-  add sp, sp, #0
+  add sp, sp, #-16
+  ldp x29, x30, [sp], #16
   ret
 .cfi_endproc
 .size f, .-f

@@ -521,7 +521,8 @@ let cogen_def def =
         let local_size = stack_size in
         ((param_size + local_size + 15) / 16) * 16  (* 16バイトアライメント *)
       in
-      emit (Printf.sprintf "  sub sp, sp, #%d" min_stack_size);
+      emit (Printf.sprintf "  stp x29, x30, [sp, #-16]!");
+      emit (Printf.sprintf "  sub sp, sp, #%d" (min_stack_size - 16));
       emit "  mov x29, sp";
 
       (* 3. レジスタで渡された引数を、スタックフレーム内に保存する *)
@@ -543,7 +544,8 @@ let cogen_def def =
       (* 関数の終了時に行われるお決まりの処理 *)
       emit (Printf.sprintf "%s:" return_label);
       (* 5. スタックフレームを解放し、呼び出し元に戻る *)
-      emit (Printf.sprintf "  add sp, sp, #%d" min_stack_size);
+      emit (Printf.sprintf "  add sp, sp, #%d" (min_stack_size - 16));
+      emit "  ldp x29, x30, [sp], #16";
       emit "  ret";
 
       emit ".cfi_endproc";
