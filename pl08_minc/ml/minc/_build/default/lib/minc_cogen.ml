@@ -119,11 +119,7 @@ let rec cogen_expr params env asm_rev expr =
                     Env.find name env in
       (* 【注意: バグあり】このロジックは、関数の最初の引数を `x1` に、その他を `x0` にロードしようとします。*)
       (* これは後続の二項演算のロジックと整合性が取れておらず、バグの原因となります。*)
-      let reg = if param_index >= 0 then
-                  if param_index = 0 then "x1"
-                  else "x0"
-                else
-                  "x0" in
+      let reg = "x0" in
       (* 【注意: バグあり】ベースレジスタとして `sp` を使っていますが、関数内でspが変化するとアドレスがずれます。*)
       (* 本来は不動の `x29` を使うべきです。 *)
       (Printf.sprintf "  ldr %s, [sp, #%d]" reg offset) :: asm_rev
@@ -198,7 +194,7 @@ let rec cogen_expr params env asm_rev expr =
                         Env.find name env in
           let asm' = cogen_expr params env asm_rev right_expr in
           (* 【注意: バグあり】引数の場合、ベースレジスタとして `sp` を使っているため、アドレスがずれる可能性があります。*)
-          let base_reg = if param_index >= 0 then "sp" else "x29" in
+          let base_reg = "x29" in
           (Printf.sprintf "  str x0, [%s, #%d]" base_reg offset) :: asm'
 
       (* ケース5-2: 単項演算子（符号反転、否定）*)
@@ -210,7 +206,8 @@ let rec cogen_expr params env asm_rev expr =
           let asm' = cogen_expr params env asm_rev arg in
           let asm'' = "  cmp x0, #0" :: asm' in
           (* 【注意】`w0` (32ビット) に結果をセットしていますが、MinCの仕様では`long` (64ビット) が要求されるため、`x0` を使うのがより正確です。*)
-          "  cset w0, eq" :: asm''
+          (* 修正しました。 *)
+          "  cset x0, eq" :: asm''
 
       (* ケース5-3: 右辺が数値リテラルの二項演算。（最適化）*)
       | ("+" | "*" | "-" | "/" | "%") as bin_op, [left; ExprIntLiteral n] ->
@@ -248,14 +245,15 @@ let rec cogen_expr params env asm_rev expr =
       (* ケース5-5: 比較演算。算術演算と同様のバグを抱えています。*)
       | ("<" | ">" | "<=" | ">=" | "==" | "!=") as cmp_op, [left; right] ->
           let asm' = cogen_expr params env asm_rev left in
-          let asm''' = cogen_expr params env asm' right in
-          let asm_cmp = "  cmp x1, x0" :: asm''' in
+          let asm_mov = "  mov x1, x0" :: asm' in               (* x0 → x1 に退避 *)
+          let asm''' = cogen_expr params env asm_mov right in    (* 右辺 → x0 *)
+          let asm_cmp = "  cmp x1, x0" :: asm''' in            (* x1(左辺) と x0(右辺) を比較 *)
           let cond = match cmp_op with
             | "<" -> "lt" | ">" -> "gt" | "<=" -> "le"
             | ">=" -> "ge" | "==" -> "eq" | "!=" -> "ne"
             | _ -> ""
           in
-          (Printf.sprintf "  cset w0, %s" cond) :: asm_cmp
+          (Printf.sprintf "  cset x0, %s" cond) :: asm_cmp
       
       (* ケース5-6: 論理演算子。短絡評価(short-circuit evaluation)を実装する。*)
       | "&&", [left; right] ->

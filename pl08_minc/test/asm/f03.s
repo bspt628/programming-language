@@ -8,7 +8,7 @@ f:
   sub sp, sp, #16
   mov x29, sp
   str x0, [sp, #56]
-  ldr x1, [sp, #56]
+  ldr x0, [sp, #56]
   b .L_epilogue_f
 .L_epilogue_f:
   add sp, sp, #16

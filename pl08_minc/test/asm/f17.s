@@ -10,7 +10,7 @@ f:
   str x0, [sp, #56]
   str x1, [sp, #48]
   str x2, [sp, #40]
-  ldr x1, [sp, #56]
+  ldr x0, [sp, #56]
   mov x1, x0
   ldr x0, [sp, #48]
   add x0, x1, x0

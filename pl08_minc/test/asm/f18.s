@@ -15,7 +15,7 @@ f:
   str x5, [sp, #16]
   str x6, [sp, #8]
   str x7, [sp, #0]
-  ldr x1, [sp, #56]
+  ldr x0, [sp, #56]
   b .L_epilogue_f
 .L_epilogue_f:
   add sp, sp, #64

@@ -8,7 +8,7 @@ f:
   sub sp, sp, #16
   mov x29, sp
   str x0, [sp, #56]
-  ldr x1, [sp, #56]
+  ldr x0, [sp, #56]
   sdiv x0, x0, x1
   mov x1, #2
   sdiv x0, x0, x1

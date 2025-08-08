@@ -9,10 +9,11 @@ f:
   mov x29, sp
   str x0, [sp, #56]
   str x1, [sp, #48]
-  ldr x1, [sp, #56]
+  ldr x0, [sp, #56]
+  mov x1, x0
   ldr x0, [sp, #48]
   cmp x1, x0
-  cset w0, eq
+  cset x0, eq
   b .L_epilogue_f
 .L_epilogue_f:
   add sp, sp, #16
